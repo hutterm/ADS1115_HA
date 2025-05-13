@@ -4,7 +4,7 @@
     "documentation": "https://github.com/hutterm/ADS1115_HA",
     "dependencies": [],
     "codeowners": [],
-    "requirements": ["ads1x15@git+https://github.com/chandrawi/ADS1x15-ADC.git@main"],
+    "requirements": ["git+https://github.com/chandrawi/ADS1x15-ADC.git@main"],
     "version": "0.1.0",
     "iot_class": "local_polling"
   }
