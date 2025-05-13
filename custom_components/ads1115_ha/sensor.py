@@ -25,7 +25,7 @@ from homeassistant.util import Throttle
 
 # Try to import the ADS1x15-ADC library
 try:
-    from ads1x15 import ads1115, ads1015, analogIn
+    import ADS1x15 #import ads1115, ads1015, analogIn
     LIBRARY_AVAILABLE = True
 except ImportError:
     LIBRARY_AVAILABLE = False
@@ -127,10 +127,12 @@ async def async_setup_platform(
 
     try:
         # Create ADC object
-        adc = ads1115.ADS1115(i2c_bus=bus, i2c_address=address)
-        adc.set_data_rate(128)  # Default data rate
-        adc.set_mode(0)  # Continuous conversion mode
-        adc.set_gain(gain)
+        adc = ADS1x15.ADS1115(bus, address)
+        #adc.setDataRate(128)  # Default data rate
+        adc.setDataRate(adc.DR_ADS111X_128)
+        adc.setMode(adc.MODE_CONTINUOUS)  # Continuous conversion mode
+        adc.setGain(gain)
+        adc.requestADC(0)  
     except Exception as ex:
         _LOGGER.error("Failed to initialize ADS1115: %s", ex)
         return
@@ -243,11 +245,15 @@ class ADS1115Sensor(SensorEntity):
     async def async_update(self):
         """Fetch new state data for the sensor."""
         try:
+            raw = self._adc.getValue()
+            #print("{0:.3f} V".format(ADS.toVoltage(raw)))
+            _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc.toVoltage(raw))
+
             # Create an analog input for the channel
-            chan = analogIn.AnalogIn(self._adc, self._channel)
+            #chan = analogIn.AnalogIn(self._adc, self._channel)
             
             # Get raw reading
-            raw = chan.value
+            #raw = chan.value
             
             # Apply Kalman filter if configured
             if self._filter:
