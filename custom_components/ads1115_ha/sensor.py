@@ -130,9 +130,9 @@ async def async_setup_platform(
         adc = ADS1x15.ADS1115(bus, address)
         #adc.setDataRate(128)  # Default data rate
         adc.setDataRate(adc.DR_ADS111X_128)
-        adc.setMode(adc.MODE_CONTINUOUS)  # Continuous conversion mode
+        #adc.setMode(adc.MODE_CONTINUOUS)  # Continuous conversion mode
         adc.setGain(gain)
-        adc.requestADC(0)  
+        #adc.requestADC(0)  
     except Exception as ex:
         _LOGGER.error("Failed to initialize ADS1115: %s", ex)
         return
@@ -245,35 +245,31 @@ class ADS1115Sensor(SensorEntity):
     async def async_update(self):
         """Fetch new state data for the sensor."""
         try:
-            raw = self._adc.getValue()
+            raw = self._adc.readADC(self._channel)
             #print("{0:.3f} V".format(ADS.toVoltage(raw)))
             _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc.toVoltage(raw))
 
-            # Create an analog input for the channel
-            #chan = analogIn.AnalogIn(self._adc, self._channel)
+            self._state = self._adc.toVoltage(raw)
             
-            # Get raw reading
-            #raw = chan.value
+            # # Apply Kalman filter if configured
+            # if self._filter:
+            #     raw = self._filter.filter(raw)
             
-            # Apply Kalman filter if configured
-            if self._filter:
-                raw = self._filter.filter(raw)
+            # # Constrain the value to min/max range
+            # raw = max(self._min, min(self._max, raw))
             
-            # Constrain the value to min/max range
-            raw = max(self._min, min(self._max, raw))
+            # # Calculate scaled value using the same approach as the JS version
+            # negative = raw < self._zero
+            # if negative:
+            #     result = (raw - self._zero) / self._negative
+            # else:
+            #     result = (raw - self._zero) / self._positive
             
-            # Calculate scaled value using the same approach as the JS version
-            negative = raw < self._zero
-            if negative:
-                result = (raw - self._zero) / self._negative
-            else:
-                result = (raw - self._zero) / self._positive
+            # if negative:
+            #     result = -1 - result
             
-            if negative:
-                result = -1 - result
-            
-            # Scale and round to get final value
-            self._state = round(result * self._scale)
+            # # Scale and round to get final value
+            # self._state = round(result * self._scale)
             self._available = True
             
         except Exception as ex:
