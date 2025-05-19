@@ -30,6 +30,10 @@ try:
 except ImportError:
     LIBRARY_AVAILABLE = False
 
+
+
+SCAN_INTERVAL = timedelta(seconds=1)
+
 _LOGGER = logging.getLogger(__name__)
 
 # Configuration constants
