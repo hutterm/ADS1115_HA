@@ -90,7 +90,11 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 class KalmanFilter:
     """Simple Kalman filter for smoothing sensor readings."""
 
-    def __init__(self, r=0.01, q=3.0):
+    # Class-level constants for process and measurement noise
+    DEFAULT_R = 0.01
+    DEFAULT_Q = 3.0
+
+    def __init__(self, r=DEFAULT_R, q=DEFAULT_Q):
         """Initialize the filter with process and measurement noise."""
         self.r = r  # Measurement noise
         self.q = q  # Process noise
@@ -168,6 +172,7 @@ async def async_setup_platform(
                 use_filter,
                 device_class,
                 update_interval,
+                f"ads1115_i2c_{bus}_{address}_{channel_number}",
             )
         )
 
@@ -190,16 +195,21 @@ class ADS1115Sensor(SensorEntity):
         use_filter,
         device_class,
         update_interval,
+        unique_id,
     ):
         """Initialize the sensor."""
-        self._adc = adc
+        self._adc_device = adc
         self._name = name
         self._channel = channel
-        self._unit_of_measurement = unit
+        self._unit = unit
         self._min = min_val
         self._max = max_val
         self._scale = scale
+        if zero < min_val:
+            raise ValueError(f"Invalid configuration: zero ({zero}) must be greater than or equal to min_val ({min_val}).")
         self._zero = zero
+        self._positive = max_val - zero
+        self._negative = zero - min_val
         self._positive = max_val - zero
         self._negative = zero - min_val
         self._filter = KalmanFilter(r=0.01, q=3.0) if use_filter else None
@@ -208,6 +218,7 @@ class ADS1115Sensor(SensorEntity):
         self._available = True
         self._update_interval = update_interval
         self._last_update = None
+        self._attr_unique_id = unique_id
 
     @property
     def name(self):
@@ -227,7 +238,7 @@ class ADS1115Sensor(SensorEntity):
     @property
     def unit_of_measurement(self):
         """Return the unit of measurement."""
-        return self._unit_of_measurement
+        return self._unit
 
     @property
     def device_class(self):
@@ -245,11 +256,11 @@ class ADS1115Sensor(SensorEntity):
     async def async_update(self):
         """Fetch new state data for the sensor."""
         try:
-            raw = self._adc.readADC(self._channel)
+            raw = self._adc_device.readADC(self._channel)
             #print("{0:.3f} V".format(ADS.toVoltage(raw)))
-            _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc.toVoltage(raw))
+            _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc_device.toVoltage(raw))
 
-            self._state = self._adc.toVoltage(raw)
+            self._state = self._adc_device.toVoltage(raw)
             
             # # Apply Kalman filter if configured
             # if self._filter:
