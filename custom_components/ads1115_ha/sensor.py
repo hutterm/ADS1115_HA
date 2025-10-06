@@ -40,6 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 CONF_I2C_BUS = "i2c_bus"
 CONF_GAIN = "gain"
 CONF_INTERVAL = "interval"
+CONF_I2C_LOCKS_KEY = "i2c_locks"
 CONF_CHANNELS = "channels"
 CONF_CHANNEL_NUMBER = "channel_number"
 CONF_UNIT = "unit"
@@ -86,6 +87,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_INTERVAL, default=DEFAULT_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=1)
         ),
+        vol.Optional(CONF_I2C_LOCKS_KEY, default="i2c_locks"): cv.string,
         vol.Required(CONF_CHANNELS): vol.All(cv.ensure_list, [CHANNEL_SCHEMA]),
     }
 )
@@ -132,15 +134,25 @@ async def async_setup_platform(
     gain = config[CONF_GAIN]
     interval = config[CONF_INTERVAL]
     channels_config = config[CONF_CHANNELS]
+    i2c_locks_key = config.get(CONF_I2C_LOCKS_KEY, "i2c_locks")
+
+    # Ensure I2C locks dictionary exists in hass.data
+    if i2c_locks_key not in hass.data:
+        hass.data[i2c_locks_key] = {}
+    i2c_locks = hass.data[i2c_locks_key]
+    if bus not in i2c_locks:
+        i2c_locks[bus] = asyncio.Lock()
+    alock = i2c_locks[bus]
 
     try:
-        # Create ADC object
-        adc = ADS1x15.ADS1115(bus, address)
-        #adc.setDataRate(128)  # Default data rate
-        adc.setDataRate(adc.DR_ADS111X_128)
-        #adc.setMode(adc.MODE_CONTINUOUS)  # Continuous conversion mode
-        adc.setGain(gain)
-        #adc.requestADC(0)  
+        async with alock:
+            # Create ADC object
+            adc = ADS1x15.ADS1115(bus, address)
+            #adc.setDataRate(128)  # Default data rate
+            adc.setDataRate(adc.DR_ADS111X_128)
+            #adc.setMode(adc.MODE_CONTINUOUS)  # Continuous conversion mode
+            adc.setGain(gain)
+            #adc.requestADC(0)  
     except Exception as ex:
         _LOGGER.error("Failed to initialize ADS1115: %s", ex)
         return
@@ -176,6 +188,7 @@ async def async_setup_platform(
                 use_filter,
                 device_class,
                 update_interval,
+                alock,
                 f"ads1115_i2c_{bus}_{address}_{channel_number}",
             )
         )
@@ -199,6 +212,7 @@ class ADS1115Sensor(SensorEntity):
         use_filter,
         device_class,
         update_interval,
+        i2c_lock,
         unique_id,
     ):
         """Initialize the sensor."""
@@ -221,6 +235,7 @@ class ADS1115Sensor(SensorEntity):
         self._state = None
         self._available = True
         self._update_interval = update_interval
+        self._i2c_lock = i2c_lock
         self._last_update = None
         self._attr_unique_id = unique_id
 
@@ -259,8 +274,11 @@ class ADS1115Sensor(SensorEntity):
     @Throttle(timedelta(seconds=1))
     async def async_update(self):
         """Fetch new state data for the sensor."""
+        raw = None
         try:
-            raw = self._adc_device.readADC(self._channel)
+            async with self._i2c_lock:
+                # Read raw ADC value
+                raw = self._adc_device.readADC(self._channel)
             #print("{0:.3f} V".format(ADS.toVoltage(raw)))
             _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc_device.toVoltage(raw))
 
