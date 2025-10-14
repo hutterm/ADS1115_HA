@@ -142,6 +142,7 @@ async def async_setup_platform(
     i2c_locks = hass.data[i2c_locks_key]
     if bus not in i2c_locks:
         i2c_locks[bus] = asyncio.Lock()
+        _LOGGER.warning("ADS1115 Created new lock for I2C bus %s", bus)
     alock = i2c_locks[bus]
 
     try:
