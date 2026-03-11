@@ -1,5 +1,4 @@
 """ADS1115 ADC Sensor integration for Home Assistant."""
-import asyncio
 import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -22,6 +21,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import Throttle
+from .i2c_lock import get_i2c_bus_lock
 
 # Try to import the ADS1x15-ADC library
 try:
@@ -60,6 +60,13 @@ DEFAULT_MIN = 0
 DEFAULT_MAX = 65535
 DEFAULT_SCALE = 65535
 DEFAULT_UNIT = PERCENTAGE
+
+
+async def async_i2c_call(hass, lock, func, *args):
+    """Run one blocking I2C call under the shared bus lock."""
+    async with lock:
+        return await hass.async_add_executor_job(func, *args)
+
 
 # Voluptuous schemas
 CHANNEL_SCHEMA = vol.Schema(
@@ -136,24 +143,14 @@ async def async_setup_platform(
     channels_config = config[CONF_CHANNELS]
     i2c_locks_key = config.get(CONF_I2C_LOCKS_KEY, "i2c_locks")
 
-    # Ensure I2C locks dictionary exists in hass.data
-    if i2c_locks_key not in hass.data:
-        hass.data[i2c_locks_key] = {}
-    i2c_locks = hass.data[i2c_locks_key]
-    if bus not in i2c_locks:
-        i2c_locks[bus] = asyncio.Lock()
+    alock, created = get_i2c_bus_lock(hass, i2c_locks_key, bus)
+    if created:
         _LOGGER.warning("ADS1115 Created new lock for I2C bus %s", bus)
-    alock = i2c_locks[bus]
 
     try:
-        async with alock:
-            # Create ADC object
-            adc = ADS1x15.ADS1115(bus, address)
-            #adc.setDataRate(128)  # Default data rate
-            adc.setDataRate(adc.DR_ADS111X_128)
-            #adc.setMode(adc.MODE_CONTINUOUS)  # Continuous conversion mode
-            adc.setGain(gain)
-            #adc.requestADC(0)  
+        adc = await async_i2c_call(hass, alock, ADS1x15.ADS1115, bus, address)
+        await async_i2c_call(hass, alock, adc.setDataRate, adc.DR_ADS111X_128)
+        await async_i2c_call(hass, alock, adc.setGain, gain)
     except Exception as ex:
         _LOGGER.error("Failed to initialize ADS1115: %s", ex)
         return
@@ -178,6 +175,7 @@ async def async_setup_platform(
 
         entities.append(
             ADS1115Sensor(
+                hass,
                 adc,
                 f"{name} {channel_name}",
                 channel_number,
@@ -202,6 +200,7 @@ class ADS1115Sensor(SensorEntity):
 
     def __init__(
         self,
+        hass,
         adc,
         name,
         channel,
@@ -217,6 +216,7 @@ class ADS1115Sensor(SensorEntity):
         unique_id,
     ):
         """Initialize the sensor."""
+        self.hass = hass
         self._adc_device = adc
         self._name = name
         self._channel = channel
@@ -277,9 +277,12 @@ class ADS1115Sensor(SensorEntity):
         """Fetch new state data for the sensor."""
         raw = None
         try:
-            async with self._i2c_lock:
-                # Read raw ADC value
-                raw = self._adc_device.readADC(self._channel)
+            raw = await async_i2c_call(
+                self.hass,
+                self._i2c_lock,
+                self._adc_device.readADC,
+                self._channel,
+            )
             #print("{0:.3f} V".format(ADS.toVoltage(raw)))
             _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc_device.toVoltage(raw))
 
