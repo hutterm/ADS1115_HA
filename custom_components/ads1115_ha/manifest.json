@@ -1,7 +1,8 @@
 {
     "domain": "ads1115_ha",
-    "name": "ADS1115 ADC Sensor",
-    "documentation": "https://github.com/hutterm/ADS1115_HA",
+  "name": "ADS1115 ADC Sensor",
+  "config_flow": true,
+  "documentation": "https://github.com/hutterm/ADS1115_HA",
     "dependencies": [],
     "codeowners": [],
     "requirements": ["ADS1x15-ADC"],

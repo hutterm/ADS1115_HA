@@ -1,3 +1,35 @@
 """Constants for the ADS1115 ADC Sensor integration."""
 
+from homeassistant.const import PERCENTAGE
+
 DOMAIN = "ads1115_ha"
+LEGACY_YAML_DOMAIN = "ads1115"
+
+CONF_I2C_BUS = "i2c_bus"
+CONF_GAIN = "gain"
+CONF_INTERVAL = "interval"
+CONF_I2C_LOCKS_KEY = "i2c_locks"
+CONF_CHANNELS = "channels"
+CONF_CHANNEL_NUMBER = "channel_number"
+CONF_UNIT = "unit"
+CONF_MIN = "min"
+CONF_MAX = "max"
+CONF_SCALE = "scale"
+CONF_ZERO = "zero"
+CONF_FILTER = "filter"
+CONF_CLASS = "class"
+
+DEFAULT_NAME = "ADS1115"
+DEFAULT_I2C_ADDRESS = 0x48
+DEFAULT_I2C_BUS = 1
+DEFAULT_GAIN = 2.0
+DEFAULT_INTERVAL = 1
+DEFAULT_I2C_LOCKS_KEY = "i2c_locks"
+
+GAIN_OPTIONS = (2.0 / 3.0, 1.0, 2.0, 4.0, 8.0, 16.0)
+
+DEFAULT_MIN = 0
+DEFAULT_MAX = 65535
+DEFAULT_SCALE = 65535
+DEFAULT_UNIT = PERCENTAGE
+DEFAULT_FILTER = False

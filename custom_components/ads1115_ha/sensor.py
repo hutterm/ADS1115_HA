@@ -1,74 +1,109 @@
 """ADS1115 ADC Sensor integration for Home Assistant."""
+
+from __future__ import annotations
+
 import logging
+import time
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import voluptuous as vol
-
 from homeassistant.components.sensor import (
     PLATFORM_SCHEMA,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import (
-    CONF_ADDRESS,
-    CONF_NAME,
-    PERCENTAGE,
-    UnitOfElectricPotential,
-)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_ADDRESS, CONF_NAME
+from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-from homeassistant.util import Throttle
+
+from .const import (
+    CONF_CHANNELS,
+    CONF_CHANNEL_NUMBER,
+    CONF_CLASS,
+    CONF_FILTER,
+    CONF_GAIN,
+    CONF_I2C_BUS,
+    CONF_I2C_LOCKS_KEY,
+    CONF_INTERVAL,
+    CONF_MAX,
+    CONF_MIN,
+    CONF_SCALE,
+    CONF_UNIT,
+    CONF_ZERO,
+    DEFAULT_FILTER,
+    DEFAULT_GAIN,
+    DEFAULT_I2C_ADDRESS,
+    DEFAULT_I2C_BUS,
+    DEFAULT_I2C_LOCKS_KEY,
+    DEFAULT_INTERVAL,
+    DEFAULT_MAX,
+    DEFAULT_MIN,
+    DEFAULT_NAME,
+    DEFAULT_SCALE,
+    DEFAULT_UNIT,
+    DOMAIN,
+    GAIN_OPTIONS,
+)
 from .i2c_lock import get_i2c_bus_lock
+
+_LOGGER = logging.getLogger(__name__)
+
 
 # Try to import the ADS1x15-ADC library
 try:
-    import ADS1x15 #import ads1115, ads1015, analogIn
+    import ADS1x15  # import ads1115, ads1015, analogIn
+
     LIBRARY_AVAILABLE = True
 except ImportError:
     LIBRARY_AVAILABLE = False
 
 
-
-SCAN_INTERVAL = timedelta(seconds=1)
-
-_LOGGER = logging.getLogger(__name__)
-
-# Configuration constants
-CONF_I2C_BUS = "i2c_bus"
-CONF_GAIN = "gain"
-CONF_INTERVAL = "interval"
-CONF_I2C_LOCKS_KEY = "i2c_locks"
-CONF_CHANNELS = "channels"
-CONF_CHANNEL_NUMBER = "channel_number"
-CONF_UNIT = "unit"
-CONF_MIN = "min"
-CONF_MAX = "max"
-CONF_SCALE = "scale"
-CONF_ZERO = "zero"
-CONF_FILTER = "filter"
-CONF_CLASS = "class"
-
-DEFAULT_NAME = "ADS1115"
-DEFAULT_I2C_ADDRESS = 0x48
-DEFAULT_I2C_BUS = 1
-DEFAULT_GAIN = 2
-DEFAULT_INTERVAL = 1
-DEFAULT_MIN = 0
-DEFAULT_MAX = 65535
-DEFAULT_SCALE = 65535
-DEFAULT_UNIT = PERCENTAGE
+def _default_channel_config(channel_number: int) -> dict[str, Any]:
+    """Return default configuration for one ADS1115 channel."""
+    return {
+        CONF_CHANNEL_NUMBER: channel_number,
+        CONF_NAME: f"ADC{channel_number}",
+        CONF_UNIT: DEFAULT_UNIT,
+        CONF_MIN: DEFAULT_MIN,
+        CONF_MAX: DEFAULT_MAX,
+        CONF_SCALE: DEFAULT_SCALE,
+        CONF_ZERO: DEFAULT_MIN,
+        CONF_FILTER: DEFAULT_FILTER,
+    }
 
 
-async def async_i2c_call(hass, lock, func, *args):
+def _normalize_channel_config(channel_config: dict[str, Any]) -> dict[str, Any]:
+    """Fill optional channel fields with defaults and validate zero bounds."""
+    channel_number = int(channel_config[CONF_CHANNEL_NUMBER])
+    min_val = int(channel_config.get(CONF_MIN, DEFAULT_MIN))
+    max_val = int(channel_config.get(CONF_MAX, DEFAULT_MAX))
+    zero_raw = channel_config.get(CONF_ZERO, min_val)
+    zero = max(min_val, min(max_val, int(zero_raw)))
+
+    return {
+        CONF_CHANNEL_NUMBER: channel_number,
+        CONF_NAME: channel_config.get(CONF_NAME, f"ADC{channel_number}"),
+        CONF_UNIT: channel_config.get(CONF_UNIT, DEFAULT_UNIT),
+        CONF_MIN: min_val,
+        CONF_MAX: max_val,
+        CONF_SCALE: int(channel_config.get(CONF_SCALE, DEFAULT_SCALE)),
+        CONF_ZERO: zero,
+        CONF_FILTER: bool(channel_config.get(CONF_FILTER, DEFAULT_FILTER)),
+        CONF_CLASS: channel_config.get(CONF_CLASS),
+    }
+
+
+async def async_i2c_call(hass: HomeAssistant, lock, func, *args):
     """Run one blocking I2C call under the shared bus lock."""
     async with lock:
         return await hass.async_add_executor_job(func, *args)
 
 
-# Voluptuous schemas
 CHANNEL_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CHANNEL_NUMBER): vol.All(vol.Coerce(int), vol.Range(min=0, max=3)),
@@ -78,7 +113,7 @@ CHANNEL_SCHEMA = vol.Schema(
         vol.Optional(CONF_MAX, default=DEFAULT_MAX): vol.Coerce(int),
         vol.Optional(CONF_SCALE, default=DEFAULT_SCALE): vol.Coerce(int),
         vol.Optional(CONF_ZERO): vol.Coerce(int),
-        vol.Optional(CONF_FILTER, default=False): cv.boolean,
+        vol.Optional(CONF_FILTER, default=DEFAULT_FILTER): cv.boolean,
         vol.Optional(CONF_CLASS): cv.string,
     }
 )
@@ -89,110 +124,132 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_I2C_BUS, default=DEFAULT_I2C_BUS): vol.Coerce(int),
         vol.Optional(CONF_ADDRESS, default=DEFAULT_I2C_ADDRESS): vol.Coerce(int),
         vol.Optional(CONF_GAIN, default=DEFAULT_GAIN): vol.All(
-            vol.Coerce(int), vol.In([2/3, 1, 2, 4, 8, 16])
+            vol.Coerce(float),
+            vol.In(GAIN_OPTIONS),
         ),
         vol.Optional(CONF_INTERVAL, default=DEFAULT_INTERVAL): vol.All(
-            vol.Coerce(int), vol.Range(min=1)
+            vol.Coerce(int),
+            vol.Range(min=1),
         ),
-        vol.Optional(CONF_I2C_LOCKS_KEY, default="i2c_locks"): cv.string,
+        vol.Optional(CONF_I2C_LOCKS_KEY, default=DEFAULT_I2C_LOCKS_KEY): cv.string,
         vol.Required(CONF_CHANNELS): vol.All(cv.ensure_list, [CHANNEL_SCHEMA]),
     }
 )
 
-# Simple Kalman filter implementation (since kalmanjs is used in the JS version)
-class KalmanFilter:
-    """Simple Kalman filter for smoothing sensor readings."""
 
-    # Class-level constants for process and measurement noise
-    DEFAULT_R = 0.01
-    DEFAULT_Q = 3.0
-
-    def __init__(self, r=DEFAULT_R, q=DEFAULT_Q):
-        """Initialize the filter with process and measurement noise."""
-        self.r = r  # Measurement noise
-        self.q = q  # Process noise
-        self.p = 1.0  # Initial error covariance
-        self.x = 0.0  # Initial value
-
-    def filter(self, measurement):
-        """Apply Kalman filter to measurement."""
-        # Prediction
-        p = self.p + self.q
-
-        # Update
-        k = p / (p + self.r)  # Kalman gain
-        self.x = self.x + k * (measurement - self.x)
-        self.p = (1 - k) * p
-
-        return self.x
-
-
-async def async_setup_platform(
-    hass, config: ConfigType, async_add_entities: AddEntitiesCallback, discovery_info: Optional[DiscoveryInfoType] = None
-) -> None:
-    """Set up the ADS1115 sensor platform."""
+async def _async_build_entities(
+    hass: HomeAssistant,
+    *,
+    name: str,
+    bus: int,
+    address: int,
+    gain: float,
+    interval: int,
+    channels_config: list[dict[str, Any]],
+    i2c_locks_key: str,
+    unique_id_prefix: str,
+) -> list["ADS1115Sensor"]:
+    """Create ADS1115 entities from configuration."""
     if not LIBRARY_AVAILABLE:
         _LOGGER.error("Failed to import ads1x15 library. Make sure it's installed.")
-        return
-
-    name = config[CONF_NAME]
-    bus = config[CONF_I2C_BUS]
-    address = config[CONF_ADDRESS]
-    gain = config[CONF_GAIN]
-    interval = config[CONF_INTERVAL]
-    channels_config = config[CONF_CHANNELS]
-    i2c_locks_key = config.get(CONF_I2C_LOCKS_KEY, "i2c_locks")
+        return []
 
     alock, created = get_i2c_bus_lock(hass, i2c_locks_key, bus)
     if created:
-        _LOGGER.warning("ADS1115 Created new lock for I2C bus %s", bus)
+        _LOGGER.warning("ADS1115 created new lock for I2C bus %s", bus)
 
     try:
         adc = await async_i2c_call(hass, alock, ADS1x15.ADS1115, bus, address)
         await async_i2c_call(hass, alock, adc.setDataRate, adc.DR_ADS111X_128)
-        await async_i2c_call(hass, alock, adc.setGain, gain)
+        await async_i2c_call(hass, alock, adc.setGain, float(gain))
     except Exception as ex:
         _LOGGER.error("Failed to initialize ADS1115: %s", ex)
-        return
+        return []
 
-    update_interval = timedelta(seconds=interval)
-    entities = []
-
-    # Create sensor entities for each configured channel
-    for channel_config in channels_config:
+    update_interval = timedelta(seconds=max(1, int(interval)))
+    entities: list[ADS1115Sensor] = []
+    for raw_channel_cfg in channels_config:
+        channel_config = _normalize_channel_config(raw_channel_cfg)
         channel_number = channel_config[CONF_CHANNEL_NUMBER]
-        channel_name = channel_config.get(CONF_NAME, f"ADC{channel_number}")
-        unit = channel_config[CONF_UNIT]
-        min_val = channel_config[CONF_MIN]
-        max_val = channel_config[CONF_MAX]
-        scale = channel_config[CONF_SCALE]
-        zero = channel_config.get(CONF_ZERO, min_val)
-        use_filter = channel_config[CONF_FILTER]
-        device_class = channel_config.get(CONF_CLASS)
-
-        # Ensure zero is within min/max bounds
-        zero = max(min_val, min(max_val, zero))
+        channel_name = channel_config[CONF_NAME]
 
         entities.append(
             ADS1115Sensor(
-                hass,
-                adc,
-                f"{name} {channel_name}",
-                channel_number,
-                unit,
-                min_val,
-                max_val,
-                scale,
-                zero,
-                use_filter,
-                device_class,
-                update_interval,
-                alock,
-                f"ads1115_i2c_{bus}_{address}_{channel_number}",
+                hass=hass,
+                adc=adc,
+                name=f"{name} {channel_name}",
+                channel=channel_number,
+                unit=channel_config[CONF_UNIT],
+                min_val=channel_config[CONF_MIN],
+                max_val=channel_config[CONF_MAX],
+                scale=channel_config[CONF_SCALE],
+                zero=channel_config[CONF_ZERO],
+                use_filter=channel_config[CONF_FILTER],
+                device_class=channel_config[CONF_CLASS],
+                update_interval=update_interval,
+                i2c_lock=alock,
+                unique_id=f"{unique_id_prefix}_{channel_number}",
+                bus=bus,
+                address=address,
+                device_name=name,
             )
         )
+    return entities
 
-    async_add_entities(entities, True)
+
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config: ConfigType,
+    async_add_entities: AddEntitiesCallback,
+    discovery_info: Optional[DiscoveryInfoType] = None,  # noqa: ARG001
+) -> None:
+    """Set up ADS1115 from legacy YAML platform config."""
+    entities = await _async_build_entities(
+        hass,
+        name=config[CONF_NAME],
+        bus=config[CONF_I2C_BUS],
+        address=config[CONF_ADDRESS],
+        gain=float(config[CONF_GAIN]),
+        interval=int(config[CONF_INTERVAL]),
+        channels_config=config[CONF_CHANNELS],
+        i2c_locks_key=config.get(CONF_I2C_LOCKS_KEY, DEFAULT_I2C_LOCKS_KEY),
+        unique_id_prefix=f"ads1115_i2c_{config[CONF_I2C_BUS]}_{config[CONF_ADDRESS]}",
+    )
+    if entities:
+        async_add_entities(entities, True)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up ADS1115 from a config entry."""
+    channels_config = entry.options.get(
+        CONF_CHANNELS,
+        entry.data.get(CONF_CHANNELS, [_default_channel_config(0)]),
+    )
+    if not channels_config:
+        channels_config = [_default_channel_config(0)]
+
+    entities = await _async_build_entities(
+        hass,
+        name=entry.data.get(CONF_NAME, DEFAULT_NAME),
+        bus=int(entry.data.get(CONF_I2C_BUS, DEFAULT_I2C_BUS)),
+        address=int(entry.data.get(CONF_ADDRESS, DEFAULT_I2C_ADDRESS)),
+        gain=float(entry.options.get(CONF_GAIN, entry.data.get(CONF_GAIN, DEFAULT_GAIN))),
+        interval=int(
+            entry.options.get(CONF_INTERVAL, entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL))
+        ),
+        channels_config=channels_config,
+        i2c_locks_key=entry.options.get(
+            CONF_I2C_LOCKS_KEY,
+            entry.data.get(CONF_I2C_LOCKS_KEY, DEFAULT_I2C_LOCKS_KEY),
+        ),
+        unique_id_prefix=f"ads1115_{entry.entry_id}",
+    )
+    if entities:
+        async_add_entities(entities, True)
 
 
 class ADS1115Sensor(SensorEntity):
@@ -200,82 +257,73 @@ class ADS1115Sensor(SensorEntity):
 
     def __init__(
         self,
-        hass,
+        *,
+        hass: HomeAssistant,
         adc,
-        name,
-        channel,
-        unit,
-        min_val,
-        max_val,
-        scale,
-        zero,
-        use_filter,
-        device_class,
-        update_interval,
+        name: str,
+        channel: int,
+        unit: str,
+        min_val: int,
+        max_val: int,
+        scale: int,
+        zero: int,
+        use_filter: bool,
+        device_class: str | None,
+        update_interval: timedelta,
         i2c_lock,
-        unique_id,
-    ):
+        unique_id: str,
+        bus: int,
+        address: int,
+        device_name: str,
+    ) -> None:
         """Initialize the sensor."""
         self.hass = hass
         self._adc_device = adc
-        self._name = name
         self._channel = channel
         self._unit = unit
         self._min = min_val
         self._max = max_val
         self._scale = scale
-        if zero < min_val:
-            raise ValueError(f"Invalid configuration: zero ({zero}) must be greater than or equal to min_val ({min_val}).")
         self._zero = zero
-        self._positive = max_val - zero
-        self._negative = zero - min_val
-        self._positive = max_val - zero
-        self._negative = zero - min_val
-        self._filter = KalmanFilter(r=0.01, q=3.0) if use_filter else None
-        self._device_class = device_class
+        self._filter_enabled = use_filter
+        self._device_class_name = device_class
         self._state = None
         self._available = True
-        self._update_interval = update_interval
+        self._update_interval_s = update_interval.total_seconds()
         self._i2c_lock = i2c_lock
-        self._last_update = None
+        self._last_update_s = 0.0
+
+        self._attr_name = name
         self._attr_unique_id = unique_id
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{bus}:{address}")},
+            "name": f"{device_name} ({bus}:0x{address:02X})",
+            "manufacturer": "Texas Instruments",
+            "model": "ADS1115",
+        }
+
+        if self._device_class_name and hasattr(SensorDeviceClass, self._device_class_name.upper()):
+            self._attr_device_class = getattr(SensorDeviceClass, self._device_class_name.upper())
 
     @property
-    def name(self):
-        """Return the name of the sensor."""
-        return self._name
-
-    @property
-    def state(self):
-        """Return the state of the sensor."""
-        return self._state
-
-    @property
-    def available(self):
+    def available(self) -> bool:
         """Return True if entity is available."""
         return self._available
 
     @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement."""
-        return self._unit
+    def native_value(self):
+        """Return the state of the sensor."""
+        return self._state
 
-    @property
-    def device_class(self):
-        """Return the device class of this entity, if any."""
-        if self._device_class and hasattr(SensorDeviceClass, self._device_class.upper()):
-            return getattr(SensorDeviceClass, self._device_class.upper())
-        return None
-
-    @property
-    def state_class(self):
-        """Return the state class of this entity."""
-        return SensorStateClass.MEASUREMENT
-
-    @Throttle(timedelta(seconds=1))
-    async def async_update(self):
+    async def async_update(self) -> None:
         """Fetch new state data for the sensor."""
-        raw = None
+        now = time.monotonic()
+        if now - self._last_update_s < self._update_interval_s:
+            return
+        self._last_update_s = now
+
         try:
             raw = await async_i2c_call(
                 self.hass,
@@ -283,32 +331,13 @@ class ADS1115Sensor(SensorEntity):
                 self._adc_device.readADC,
                 self._channel,
             )
-            #print("{0:.3f} V".format(ADS.toVoltage(raw)))
-            _LOGGER.debug("Raw ADC value/voltage: %s/%s", raw, self._adc_device.toVoltage(raw))
-
+            _LOGGER.debug(
+                "Raw ADC value/voltage: %s/%s",
+                raw,
+                self._adc_device.toVoltage(raw),
+            )
             self._state = self._adc_device.toVoltage(raw)
-            
-            # # Apply Kalman filter if configured
-            # if self._filter:
-            #     raw = self._filter.filter(raw)
-            
-            # # Constrain the value to min/max range
-            # raw = max(self._min, min(self._max, raw))
-            
-            # # Calculate scaled value using the same approach as the JS version
-            # negative = raw < self._zero
-            # if negative:
-            #     result = (raw - self._zero) / self._negative
-            # else:
-            #     result = (raw - self._zero) / self._positive
-            
-            # if negative:
-            #     result = -1 - result
-            
-            # # Scale and round to get final value
-            # self._state = round(result * self._scale)
             self._available = True
-            
         except Exception as ex:
             _LOGGER.error("Error reading ADS1115 channel %s: %s", self._channel, ex)
             self._available = False
