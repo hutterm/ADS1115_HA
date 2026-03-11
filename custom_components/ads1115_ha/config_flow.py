@@ -50,14 +50,8 @@ _GAIN_LABEL_TO_VALUE = {
     "16": 16.0,
 }
 
-_GAIN_OPTIONS = [
-    selector.SelectOptionDict(value=label, label=label)
-    for label in _GAIN_LABEL_TO_VALUE
-]
-_CHANNEL_OPTIONS = [
-    selector.SelectOptionDict(value=channel, label=f"Channel {channel}")
-    for channel in range(4)
-]
+_GAIN_OPTIONS = list(_GAIN_LABEL_TO_VALUE.keys())
+_CHANNEL_OPTIONS = [str(channel) for channel in range(4)]
 
 
 def _gain_to_label(value: float) -> str:
@@ -137,7 +131,7 @@ def _user_schema(
     default_lock_key: str = DEFAULT_I2C_LOCKS_KEY,
     default_channels: list[int] | None = None,
 ) -> vol.Schema:
-    channels_default = default_channels if default_channels else [0]
+    channels_default = [str(channel) for channel in (default_channels if default_channels else [0])]
     return vol.Schema(
         {
             vol.Required(CONF_NAME, default=default_name): str,
@@ -145,7 +139,7 @@ def _user_schema(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=9,
-                    mode=selector.NumberSelectorMode.BOX,
+                    mode="box",
                     step=1,
                 )
             ),
@@ -153,21 +147,21 @@ def _user_schema(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=127,
-                    mode=selector.NumberSelectorMode.BOX,
+                    mode="box",
                     step=1,
                 )
             ),
             vol.Required(CONF_GAIN, default=default_gain_label): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=_GAIN_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    mode="dropdown",
                 )
             ),
             vol.Required(CONF_INTERVAL, default=default_interval): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1,
                     max=3600,
-                    mode=selector.NumberSelectorMode.BOX,
+                    mode="box",
                     step=1,
                 )
             ),
@@ -178,7 +172,7 @@ def _user_schema(
             vol.Required(CONF_CHANNELS, default=channels_default): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=_CHANNEL_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    mode="dropdown",
                     multiple=True,
                 )
             ),
@@ -191,21 +185,21 @@ def _options_schema(
     default_gain_label: str,
     default_interval: int,
     default_lock_key: str,
-    default_channels: list[int],
+    default_channels: list[str],
 ) -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(CONF_GAIN, default=default_gain_label): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=_GAIN_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    mode="dropdown",
                 )
             ),
             vol.Required(CONF_INTERVAL, default=default_interval): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1,
                     max=3600,
-                    mode=selector.NumberSelectorMode.BOX,
+                    mode="box",
                     step=1,
                 )
             ),
@@ -216,7 +210,7 @@ def _options_schema(
             vol.Required(CONF_CHANNELS, default=default_channels): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=_CHANNEL_OPTIONS,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    mode="dropdown",
                     multiple=True,
                 )
             ),
@@ -288,7 +282,7 @@ class ADS1115ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
-                gain = _GAIN_LABEL_TO_VALUE[user_input[CONF_GAIN]]
+                gain = _GAIN_LABEL_TO_VALUE[str(user_input[CONF_GAIN])]
                 return self.async_create_entry(
                     title=f"{user_input[CONF_NAME]} ({int(user_input[CONF_I2C_BUS])}:0x{int(user_input[CONF_ADDRESS]):02X})",
                     data={
@@ -334,6 +328,7 @@ class ADS1115OptionsFlow(config_entries.OptionsFlow):
                 if CONF_CHANNEL_NUMBER in channel_config
             }
         ) or [0]
+        default_channel_values = [str(channel) for channel in default_channels]
 
         if user_input is not None:
             channels = _selected_channels(user_input[CONF_CHANNELS])
@@ -343,7 +338,7 @@ class ADS1115OptionsFlow(config_entries.OptionsFlow):
                 return self.async_create_entry(
                     title="",
                     data={
-                        CONF_GAIN: float(_GAIN_LABEL_TO_VALUE[user_input[CONF_GAIN]]),
+                        CONF_GAIN: float(_GAIN_LABEL_TO_VALUE[str(user_input[CONF_GAIN])]),
                         CONF_INTERVAL: int(user_input[CONF_INTERVAL]),
                         CONF_I2C_LOCKS_KEY: str(user_input[CONF_I2C_LOCKS_KEY]),
                         CONF_CHANNELS: _build_channel_configs(channels, existing_channels),
@@ -365,7 +360,7 @@ class ADS1115OptionsFlow(config_entries.OptionsFlow):
                         DEFAULT_I2C_LOCKS_KEY,
                     )
                 ),
-                default_channels=default_channels,
+                default_channels=default_channel_values,
             ),
             errors=errors,
         )
