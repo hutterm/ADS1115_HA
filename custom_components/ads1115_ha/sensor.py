@@ -50,8 +50,10 @@ from .const import (
     GAIN_OPTIONS,
 )
 from .i2c_lock import get_i2c_bus_lock
+from .runtime import ensure_entry_runtime, get_entry_runtime, get_runtime_interval
 
 _LOGGER = logging.getLogger(__name__)
+SCAN_INTERVAL = timedelta(seconds=1)
 
 
 # Try to import the ADS1x15-ADC library
@@ -148,6 +150,7 @@ async def _async_build_entities(
     channels_config: list[dict[str, Any]],
     i2c_locks_key: str,
     unique_id_prefix: str,
+    runtime_data: dict[str, Any] | None = None,
 ) -> list["ADS1115Sensor"]:
     """Create ADS1115 entities from configuration."""
     if not LIBRARY_AVAILABLE:
@@ -192,6 +195,7 @@ async def _async_build_entities(
                 bus=bus,
                 address=address,
                 device_name=name,
+                runtime_data=runtime_data,
             )
         )
     return entities
@@ -225,6 +229,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up ADS1115 from a config entry."""
+    runtime_data = get_entry_runtime(hass, entry.entry_id)
+    if runtime_data is None:
+        runtime_data = ensure_entry_runtime(hass, entry)
+
     channels_config = entry.options.get(
         CONF_CHANNELS,
         entry.data.get(CONF_CHANNELS, [_default_channel_config(0)]),
@@ -247,6 +255,7 @@ async def async_setup_entry(
             entry.data.get(CONF_I2C_LOCKS_KEY, DEFAULT_I2C_LOCKS_KEY),
         ),
         unique_id_prefix=f"ads1115_{entry.entry_id}",
+        runtime_data=runtime_data,
     )
     if entities:
         async_add_entities(entities, True)
@@ -275,6 +284,7 @@ class ADS1115Sensor(SensorEntity):
         bus: int,
         address: int,
         device_name: str,
+        runtime_data: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
@@ -290,6 +300,7 @@ class ADS1115Sensor(SensorEntity):
         self._state = None
         self._available = True
         self._update_interval_s = update_interval.total_seconds()
+        self._runtime_data = runtime_data
         self._i2c_lock = i2c_lock
         self._last_update_s = 0.0
 
@@ -320,7 +331,12 @@ class ADS1115Sensor(SensorEntity):
     async def async_update(self) -> None:
         """Fetch new state data for the sensor."""
         now = time.monotonic()
-        if now - self._last_update_s < self._update_interval_s:
+        update_interval_s = (
+            float(get_runtime_interval(self._runtime_data, int(self._update_interval_s)))
+            if self._runtime_data is not None
+            else self._update_interval_s
+        )
+        if now - self._last_update_s < update_interval_s:
             return
         self._last_update_s = now
 

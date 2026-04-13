@@ -29,7 +29,6 @@
         "title": "ADS1115 options",
         "data": {
           "gain": "Gain",
-          "interval": "Update interval (seconds)",
           "i2c_locks": "Shared I2C lock key",
           "channels": "Enabled channels"
         }

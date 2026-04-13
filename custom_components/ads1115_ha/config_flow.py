@@ -90,6 +90,8 @@ def _build_channel_configs(
 ) -> list[dict[str, Any]]:
     existing_map: dict[int, dict[str, Any]] = {}
     for config in existing_configs or []:
+        if not isinstance(config, dict):
+            continue
         channel = config.get(CONF_CHANNEL_NUMBER)
         if channel is None:
             continue
@@ -183,7 +185,6 @@ def _user_schema(
 def _options_schema(
     *,
     default_gain_label: str,
-    default_interval: int,
     default_lock_key: str,
     default_channels: list[str],
 ) -> vol.Schema:
@@ -193,14 +194,6 @@ def _options_schema(
                 selector.SelectSelectorConfig(
                     options=_GAIN_OPTIONS,
                     mode="dropdown",
-                )
-            ),
-            vol.Required(CONF_INTERVAL, default=default_interval): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1,
-                    max=3600,
-                    mode="box",
-                    step=1,
                 )
             ),
             vol.Required(
@@ -311,23 +304,24 @@ class ADS1115ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ADS1115OptionsFlow(config_entry)
 
 
-class ADS1115OptionsFlow(config_entries.OptionsFlow):
+class ADS1115OptionsFlow(config_entries.OptionsFlowWithConfigEntry):
     """Handle ADS1115 options flow."""
-
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Manage options."""
         errors: dict[str, str] = {}
         existing_channels = self.config_entry.options.get(CONF_CHANNELS, [])
-        default_channels = sorted(
-            {
-                int(channel_config[CONF_CHANNEL_NUMBER])
-                for channel_config in existing_channels
-                if CONF_CHANNEL_NUMBER in channel_config
-            }
-        ) or [0]
+        channel_numbers: set[int] = set()
+        for channel_config in existing_channels:
+            if isinstance(channel_config, dict):
+                channel_value = channel_config.get(CONF_CHANNEL_NUMBER)
+            else:
+                channel_value = channel_config
+            if channel_value is None:
+                continue
+            channel_numbers.add(int(channel_value))
+
+        default_channels = sorted(channel_numbers) or [0]
         default_channel_values = [str(channel) for channel in default_channels]
 
         if user_input is not None:
@@ -339,7 +333,12 @@ class ADS1115OptionsFlow(config_entries.OptionsFlow):
                     title="",
                     data={
                         CONF_GAIN: float(_GAIN_LABEL_TO_VALUE[str(user_input[CONF_GAIN])]),
-                        CONF_INTERVAL: int(user_input[CONF_INTERVAL]),
+                        CONF_INTERVAL: int(
+                            self.config_entry.options.get(
+                                CONF_INTERVAL,
+                                self.config_entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL),
+                            )
+                        ),
                         CONF_I2C_LOCKS_KEY: str(user_input[CONF_I2C_LOCKS_KEY]),
                         CONF_CHANNELS: _build_channel_configs(channels, existing_channels),
                     },
@@ -350,9 +349,6 @@ class ADS1115OptionsFlow(config_entries.OptionsFlow):
             data_schema=_options_schema(
                 default_gain_label=_gain_to_label(
                     float(self.config_entry.options.get(CONF_GAIN, DEFAULT_GAIN))
-                ),
-                default_interval=int(
-                    self.config_entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL)
                 ),
                 default_lock_key=str(
                     self.config_entry.options.get(
