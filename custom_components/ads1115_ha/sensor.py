@@ -50,7 +50,12 @@ from .const import (
     GAIN_OPTIONS,
 )
 from .i2c_lock import get_i2c_bus_lock
-from .runtime import ensure_entry_runtime, get_entry_runtime, get_runtime_interval
+from .runtime import (
+    ensure_entry_runtime,
+    get_entry_runtime,
+    get_runtime_interval,
+    get_runtime_readout_enabled,
+)
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=1)
@@ -330,6 +335,9 @@ class ADS1115Sensor(SensorEntity):
 
     async def async_update(self) -> None:
         """Fetch new state data for the sensor."""
+        if self._runtime_data is not None and not get_runtime_readout_enabled(self._runtime_data):
+            return
+
         now = time.monotonic()
         update_interval_s = (
             float(get_runtime_interval(self._runtime_data, int(self._update_interval_s)))

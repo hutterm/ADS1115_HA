@@ -7,7 +7,13 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_INTERVAL, DEFAULT_INTERVAL, DOMAIN
+from .const import (
+    CONF_INTERVAL,
+    CONF_READOUT_ENABLED,
+    DEFAULT_INTERVAL,
+    DEFAULT_READOUT_ENABLED,
+    DOMAIN,
+)
 
 
 def _entry_interval(entry: ConfigEntry) -> int:
@@ -17,11 +23,20 @@ def _entry_interval(entry: ConfigEntry) -> int:
     )
 
 
+def _entry_readout_enabled(entry: ConfigEntry) -> bool:
+    value = entry.options.get(
+        CONF_READOUT_ENABLED,
+        entry.data.get(CONF_READOUT_ENABLED, DEFAULT_READOUT_ENABLED),
+    )
+    return bool(value)
+
+
 def ensure_entry_runtime(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Create or refresh runtime data for one config entry."""
     domain_data: dict[str, dict[str, Any]] = hass.data.setdefault(DOMAIN, {})
     runtime = domain_data.setdefault(entry.entry_id, {})
     runtime[CONF_INTERVAL] = _entry_interval(entry)
+    runtime[CONF_READOUT_ENABLED] = _entry_readout_enabled(entry)
     return runtime
 
 
@@ -45,3 +60,18 @@ def get_runtime_interval(runtime: dict[str, Any] | None, fallback: int = DEFAULT
 def set_runtime_interval(runtime: dict[str, Any], interval_s: int) -> None:
     """Set runtime update interval in seconds."""
     runtime[CONF_INTERVAL] = max(1, int(interval_s))
+
+
+def get_runtime_readout_enabled(
+    runtime: dict[str, Any] | None,
+    fallback: bool = DEFAULT_READOUT_ENABLED,
+) -> bool:
+    """Return readout enabled state from runtime data."""
+    if runtime is None:
+        return bool(fallback)
+    return bool(runtime.get(CONF_READOUT_ENABLED, fallback))
+
+
+def set_runtime_readout_enabled(runtime: dict[str, Any], enabled: bool) -> None:
+    """Set readout enabled state in runtime data."""
+    runtime[CONF_READOUT_ENABLED] = bool(enabled)

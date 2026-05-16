@@ -12,7 +12,7 @@ from .runtime import ensure_entry_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.NUMBER]
+PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SWITCH]
 
 
 async def async_setup(hass: HomeAssistant, config) -> bool:

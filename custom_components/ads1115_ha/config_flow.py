@@ -24,6 +24,7 @@ from .const import (
     CONF_INTERVAL,
     CONF_MAX,
     CONF_MIN,
+    CONF_READOUT_ENABLED,
     CONF_SCALE,
     CONF_UNIT,
     CONF_ZERO,
@@ -36,6 +37,7 @@ from .const import (
     DEFAULT_MAX,
     DEFAULT_MIN,
     DEFAULT_NAME,
+    DEFAULT_READOUT_ENABLED,
     DEFAULT_SCALE,
     DEFAULT_UNIT,
     DOMAIN,
@@ -259,6 +261,9 @@ class ADS1115ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_INTERVAL: int(user_input[CONF_INTERVAL]),
                 CONF_I2C_LOCKS_KEY: str(user_input[CONF_I2C_LOCKS_KEY]),
                 CONF_CHANNELS: channels_config,
+                CONF_READOUT_ENABLED: bool(
+                    user_input.get(CONF_READOUT_ENABLED, DEFAULT_READOUT_ENABLED)
+                ),
             },
         )
 
@@ -288,6 +293,9 @@ class ADS1115ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_INTERVAL: int(user_input[CONF_INTERVAL]),
                         CONF_I2C_LOCKS_KEY: str(user_input[CONF_I2C_LOCKS_KEY]),
                         CONF_CHANNELS: _build_channel_configs(channels),
+                        CONF_READOUT_ENABLED: bool(
+                            user_input.get(CONF_READOUT_ENABLED, DEFAULT_READOUT_ENABLED)
+                        ),
                     },
                 )
 
@@ -341,6 +349,15 @@ class ADS1115OptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                         ),
                         CONF_I2C_LOCKS_KEY: str(user_input[CONF_I2C_LOCKS_KEY]),
                         CONF_CHANNELS: _build_channel_configs(channels, existing_channels),
+                        CONF_READOUT_ENABLED: bool(
+                            self.config_entry.options.get(
+                                CONF_READOUT_ENABLED,
+                                self.config_entry.data.get(
+                                    CONF_READOUT_ENABLED,
+                                    DEFAULT_READOUT_ENABLED,
+                                ),
+                            )
+                        ),
                     },
                 )
 
